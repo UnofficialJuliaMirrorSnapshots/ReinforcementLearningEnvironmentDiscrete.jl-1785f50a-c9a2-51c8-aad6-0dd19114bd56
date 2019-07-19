@@ -34,14 +34,14 @@ function checkpos(maze, pos)
 end
 
 function addrandomwall!(maze)
-    startpos = rand(findall(x -> x != 0, maze[:]))
+    startpos = rand(ENV_RNG, findall(x -> x != 0, maze[:]))
     startpos = indto2d(maze, startpos)
     starttouch = checkpos(maze, startpos)
     if starttouch > 0
         return 0
     end
     endx, endy = startpos
-    if rand(0:1) == 0 # horizontal
+    if rand(ENV_RNG, 0:1) == 0 # horizontal
         while checkpos(maze, [endx, startpos[2]]) == 0
             endx += 1
         end
@@ -76,10 +76,14 @@ function setTandR!(d, s)
     goals = d.goals
     ns = d.mdp.observationspace.n
     maze = d.maze
+    idx_goals = findfirst(x -> x == s, goals)
+    if idx_goals !== nothing
+        R.value[s] = d.goalrewards[idx_goals]
+    end
+    pos = indto2d(maze, d.mazefromstate[s])
     for (aind, a) in enumerate(([0, 1], [1, 0], [0, -1], [-1, 0]))
-        pos = indto2d(maze, d.mazefromstate[s])
         nextpos = maze[(pos + a)...] == 0 ? pos : pos + a
-        if d.neighbourstateweight > 0 && !(statefrommaze[posto1d(maze, nextpos)] in goals)
+        if d.neighbourstateweight > 0
             positions = []
             push!(positions, nextpos)
             weights = [1.]
@@ -95,9 +99,6 @@ function setTandR!(d, s)
         else
             nexts = statefrommaze[posto1d(maze, nextpos)]
             T[aind, s] = sparsevec([nexts], [1.], ns)
-            if nexts in goals
-                R[aind, s] = d.goalrewards[findfirst(x -> x == nexts, goals)]
-            end
         end
     end
 end
@@ -110,18 +111,18 @@ function n_effective(n, f, list)
     N = n === nothing ? div(length(list), Int(1/f)) : n
     min(N, length(list))
 end
-function breaksomewalls!(m; f = 1/50, n = nothing)
+function breaksomewalls!(m; f = 1/50, n = nothing, rng = ENV_RNG)
     zeros = Int[]
     for i in 1:length(m)
         m[i] == 0 && isinsideframe(m, i) && push!(zeros, i)
     end
-    pos = sample(zeros, n_effective(n, f, zeros), replace = false)
+    pos = sample(rng, zeros, n_effective(n, f, zeros), replace = false)
     m[pos] .= 1
     m
 end
-function addobstacles!(m; f = 1/100, n = nothing)
+function addobstacles!(m; f = 1/100, n = nothing, rng = ENV_RNG)
     nz = findall(x -> x == 1, reshape(m, :))
-    pos = sample(nz, n_effective(n, f, nz), replace = false)
+    pos = sample(rng, nz, n_effective(n, f, nz), replace = false)
     m[pos] .= 0
     m
 end
@@ -171,13 +172,13 @@ function DiscreteMaze(maze; ngoals = 1, goalrewards = 1., stepcost = 0,
     legalstates = statefrommaze[nzpos]
     ns = length(mazefromstate)
     T = Array{SparseVector{Float64,Int}}(undef, na, ns)
-    goals = sort(sample(legalstates, ngoals, replace = false))
-    R = -ones(na, ns) * stepcost
+    goals = sort(sample(ENV_RNG, legalstates, ngoals, replace = false))
+    R = DeterministicNextStateReward(fill(-stepcost, ns))
     isterminal = zeros(Int, ns); isterminal[goals] .= 1
     isinitial = setdiff(legalstates, goals)
     res = DiscreteMaze(MDP(DiscreteSpace(ns, 1),
                            DiscreteSpace(na, 1),
-                           rand(legalstates),
+                           rand(ENV_RNG, legalstates),
                            T, R,
                            isinitial, isterminal),
                        maze,
